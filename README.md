@@ -1,4 +1,3 @@
-```html
 <h1 align="center">🚀 YOLOX Auto Training Script</h1>
 
 <p align="center">
@@ -146,4 +145,3 @@ This repository is built on top of the original YOLOX project.
 <p>
 Many thanks to <b>Dr. Jian Sun</b> and all YOLOX contributors for their exceptional work and dedication to advancing computer vision research.
 </p>
-```
