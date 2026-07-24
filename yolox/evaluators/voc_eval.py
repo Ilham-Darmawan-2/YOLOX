@@ -76,32 +76,42 @@ def voc_eval(
     ovthresh=0.5,
     use_07_metric=False,
 ):
-    # first load gt
+    # 1. Pastikan folder cache ada
     if not os.path.isdir(cachedir):
-        os.mkdir(cachedir)
+        os.makedirs(cachedir, exist_ok=True)
     cachefile = os.path.join(cachedir, "annots.pkl")
-    # read list of images
+
+    # 2. Baca daftar nama gambar
     with open(imagesetfile, "r") as f:
         lines = f.readlines()
     imagenames = [x.strip() for x in lines]
 
+    # 3. AMBIL PATH ANNOTATIONS SECARA DINAMIS DARI imagesetfile
+    # imagesetfile: ".../VOC2012/ImageSets/Main/valid.txt"
+    # Naik 2 tingkat dari "ImageSets/Main/valid.txt" ke ".../VOC2012"
+    voc_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(imagesetfile))))
+    annotations_dir = os.path.join(voc_root, "Annotations")
+
+    # 4. Load atau Parse Annotations
     if not os.path.isfile(cachefile):
-        # load annots
         recs = {}
         for i, imagename in enumerate(imagenames):
-            recs[imagename] = parse_rec(annopath.format(imagename))
+            # Bentuk absolute path sempurna ke file XML
+            target_xml_path = os.path.join(annotations_dir, f"{imagename}.xml")
+            
+            recs[imagename] = parse_rec(target_xml_path)
+            
             if i % 100 == 0:
                 print(f"Reading annotation for {i + 1}/{len(imagenames)}")
-        # save
+        
         print(f"Saving cached annotations to {cachefile}")
         with open(cachefile, "wb") as f:
             pickle.dump(recs, f)
     else:
-        # load
         with open(cachefile, "rb") as f:
             recs = pickle.load(f)
 
-    # extract gt objects for this class
+    # 5. Extract Ground Truth Objects untuk Kelas Ini
     class_recs = {}
     npos = 0
     for imagename in imagenames:
@@ -112,7 +122,7 @@ def voc_eval(
         npos = npos + sum(~difficult)
         class_recs[imagename] = {"bbox": bbox, "difficult": difficult, "det": det}
 
-    # read dets
+    # 6. Baca Hasil Deteksi Model
     detfile = detpath.format(classname)
     with open(detfile, "r") as f:
         lines = f.readlines()
@@ -125,12 +135,12 @@ def voc_eval(
     confidence = np.array([float(x[1]) for x in splitlines])
     BB = np.array([[float(z) for z in x[2:]] for x in splitlines])
 
-    # sort by confidence
+    # Sort berdasarkan confidence score
     sorted_ind = np.argsort(-confidence)
     BB = BB[sorted_ind, :]
     image_ids = [image_ids[x] for x in sorted_ind]
 
-    # go down dets and mark TPs and FPs
+    # 7. Hitung TP & FP
     nd = len(image_ids)
     tp = np.zeros(nd)
     fp = np.zeros(nd)
@@ -141,8 +151,6 @@ def voc_eval(
         BBGT = R["bbox"].astype(float)
 
         if BBGT.size > 0:
-            # compute overlaps
-            # intersection
             ixmin = np.maximum(BBGT[:, 0], bb[0])
             iymin = np.maximum(BBGT[:, 1], bb[1])
             ixmax = np.minimum(BBGT[:, 2], bb[2])
@@ -151,7 +159,6 @@ def voc_eval(
             ih = np.maximum(iymax - iymin + 1.0, 0.0)
             inters = iw * ih
 
-            # union
             uni = (
                 (bb[2] - bb[0] + 1.0) * (bb[3] - bb[1] + 1.0)
                 + (BBGT[:, 2] - BBGT[:, 0] + 1.0) * (BBGT[:, 3] - BBGT[:, 1] + 1.0) - inters
@@ -171,12 +178,10 @@ def voc_eval(
         else:
             fp[d] = 1.0
 
-        # compute precision recall
+    # 8. Hitung Precision & Recall
     fp = np.cumsum(fp)
     tp = np.cumsum(tp)
-    rec = tp / float(npos)
-    # avoid divide by zero in case the first detection matches a difficult
-    # ground truth
+    rec = tp / float(npos) if npos > 0 else np.zeros_like(tp)
     prec = tp / np.maximum(tp + fp, np.finfo(np.float64).eps)
     ap = voc_ap(rec, prec, use_07_metric)
 
