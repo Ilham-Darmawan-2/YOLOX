@@ -5,7 +5,6 @@ import urllib.request
 import subprocess
 import argparse
 import sys
-import xml.etree.ElementTree as ET
 
 # Architecture Configuration Mapping
 ARCH_MAP = {
@@ -64,8 +63,8 @@ def find_annotations_dir(config_path):
 
 def update_voc_classes(config_path):
     """
-    Scan seluruh file XML di folder Annotations, urutkan kelas secara alfabetis,
-    lalu perbarui file yolox/data/datasets/voc_classes.py
+    Fast-scan seluruh file XML di folder Annotations menggunakan regex, 
+    urutkan kelas secara alfabetis, lalu perbarui yolox/data/datasets/voc_classes.py
     """
     annotations_dir = find_annotations_dir(config_path)
     print(f"[INFO] Scanning XML files in: {annotations_dir}")
@@ -76,14 +75,16 @@ def update_voc_classes(config_path):
         return 0
 
     detected_classes = set()
+    # Tag <name>...</name> dibaca via regex langsung tanpa parse tree utuh
+    class_pattern = re.compile(r"<name>(.*?)</name>")
+
     for xml_file in xml_files:
         try:
-            tree = ET.parse(xml_file)
-            root = tree.getroot()
-            for obj in root.findall("object"):
-                name = obj.find("name")
-                if name is not None and name.text:
-                    detected_classes.add(name.text.strip())
+            with open(xml_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                matches = class_pattern.findall(content)
+                for name in matches:
+                    detected_classes.add(name.strip())
         except Exception as e:
             print(f"[WARNING] Error reading {xml_file}: {e}")
 
@@ -265,7 +266,7 @@ def main():
         help="Maximum number of training epochs"
     )
 
-    # Optional argument
+    # Optional arguments
     parser.add_argument(
         "--classNumber",
         type=int,
@@ -286,21 +287,37 @@ def main():
         help="Enable mixed precision (FP16) training"
     )
 
+    # Continue & Model Path Arguments
     parser.add_argument(
-        "--resume",
+        "--continue",
+        dest="continue_training",
         action="store_true",
-        help="Resume training from the latest checkpoint"
+        help="Continue training from a custom model checkpoint"
+    )
+
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to custom model checkpoint file (.pth) (REQUIRED when --continue is active)"
     )
 
     args = parser.parse_args()
 
+    # Validasi logika: Jika --continue aktif, --model_path WAJIB diisi
+    if args.continue_training:
+        if not args.model_path:
+            parser.error("You need to give --model_path if you use flag --continue!")
+        if not os.path.exists(args.model_path):
+            parser.error(f"File checkpoint model not found in this path: {args.model_path}")
+
     selected_arch = ARCH_MAP[args.arch]
 
     try:
-        # 1. Scan XML dan Update voc_classes.py
+        # 1. Selalu jalankan Fast XML Scan & Update voc_classes.py
         scanned_num_classes = update_voc_classes(selected_arch["config"])
 
-        # Tentukan nilai num_classes
+        # Tentukan nilai final num_classes
         if args.classNumber is not None:
             final_num_classes = args.classNumber
         else:
@@ -314,20 +331,27 @@ def main():
             final_num_classes
         )
 
-        # 3. Download pretrained weight jika belum ada
-        download_weight(
-            selected_arch["weight"],
-            selected_arch["url"]
-        )
+        # 3. Tentukan weight yang dipakai
+        if args.continue_training:
+            # Menggunakan custom checkpoint path hasil training kamu sebelumnya
+            weight_to_use = args.model_path
+            print(f"[INFO] Continuing training using checkpoint: {weight_to_use}")
+        else:
+            # Menggunakan pretrained base weight bawaan
+            download_weight(
+                selected_arch["weight"],
+                selected_arch["url"]
+            )
+            weight_to_use = selected_arch["weight"]
 
         # 4. Run Training
         run_training(
             config_path=selected_arch["config"],
             batch_size=args.batch,
-            weight_name=selected_arch["weight"],
+            weight_name=weight_to_use,
             devices=args.devices,
             fp16=args.fp16,
-            resume=args.resume
+            resume=args.continue_training
         )
 
     except KeyboardInterrupt:
