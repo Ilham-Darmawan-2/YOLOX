@@ -3,6 +3,7 @@ import re
 import urllib.request
 import subprocess
 import argparse
+import sys
 
 # Architecture Configuration Mapping
 ARCH_MAP = {
@@ -98,7 +99,7 @@ def run_training(
     Build and execute the YOLOX training command dynamically.
     """
     command = [
-        "python",
+        sys.executable,
         "tools/train.py",
         "-f",
         config_path,
