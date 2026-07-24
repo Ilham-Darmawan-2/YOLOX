@@ -99,8 +99,10 @@ class Exp(MyExp):
     def get_eval_loader(self, batch_size, is_distributed, testdev=False, legacy=False):
         from yolox.data import VOCDetection, ValTransform
 
+        data_dir = os.path.join(get_yolox_datadir(), "VOCdevkit")
+
         valdataset = VOCDetection(
-            data_dir=os.path.join(get_yolox_datadir(), "VOCdevkit"),
+            data_dir=data_dir,
             image_sets=[('2012', 'valid')],
             img_size=self.test_size,
             preproc=ValTransform(legacy=legacy),
